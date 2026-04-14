@@ -6,7 +6,7 @@ import (
 )
 
 type FingerprintInput struct {
-	AccountID  int64      `json:"account_id"`
+	AccountID  string     `json:"account_id"`
 	ObservedAt *time.Time `json:"observed_at"`
 
 	// hard
@@ -71,13 +71,13 @@ func (f *FingerprintInput) GetObservedAt() time.Time {
 }
 
 type ResolveResult struct {
-	BrowserProfileID          int64   `json:"browser_profile_id"`
-	DeviceClusterID           int64   `json:"device_cluster_id"`
-	MatchType                 string  `json:"match_type"`
-	Score                     float64 `json:"score"`
-	IsMultiAccountSuspected   bool    `json:"is_multi_account_suspected"`
-	LinkedAccountsCount       int     `json:"linked_accounts_count"`
-	DeviceLinkedAccountsCount int     `json:"device_linked_accounts_count"`
+	AccountID                 string   `json:"account_id"`
+	BrowserProfileID          string   `json:"browser_profile_id"`
+	GlobalDeviceID            string   `json:"global_device_id"`
+	MatchType                 string   `json:"match_type"`
+	Score                     float64  `json:"score"`
+	DeviceLinkedAccountsCount int      `json:"device_linked_accounts_count"`
+	DeviceLinkedAccounts      []string `json:"device_linked_accounts"`
 }
 
 type ErrorResponse struct {

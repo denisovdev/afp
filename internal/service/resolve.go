@@ -77,25 +77,33 @@ func (s *FingerprintService) ResolveOrCreateProfile(ctx context.Context, input d
 		}
 
 		// --- device cluster ---
-		// Resolve the cluster for the CURRENT request's hardware fingerprint.
-		requestClusterID, _, err := s.resolveCluster(txCtx, hardwareFP, input, observedAt)
+		requestClusterID, requestClusterPublicID, _, err := s.resolveCluster(txCtx, hardwareFP, input, observedAt)
 		if err != nil {
 			return err
 		}
 
 		var profileID int64
-		// profileClusterID is the cluster the browser_profile actually belongs to.
-		// For existing profiles that already have a cluster, we keep it unchanged —
-		// a candidate match from a different device must not reassign the profile.
+		var profilePublicID string
 		var profileClusterID int64
+		var profileClusterPublicID string
 
 		if matchedProfile != nil {
 			profileID = matchedProfile.BrowserProfileID
+			profilePublicID = matchedProfile.PublicID
 
 			if matchedProfile.DeviceClusterID != nil {
 				profileClusterID = *matchedProfile.DeviceClusterID
+				// Fetch the cluster's public_id
+				cl, err := s.clusters.FindClusterByHardwareFP(txCtx, matchedProfile.HardwareFP)
+				if err != nil {
+					return err
+				}
+				if cl != nil {
+					profileClusterPublicID = cl.PublicID
+				}
 			} else {
 				profileClusterID = requestClusterID
+				profileClusterPublicID = requestClusterPublicID
 			}
 
 			s.updateProfile(matchedProfile, input, hardFP, softFP, hardwareFP, profileClusterID, observedAt)
@@ -106,8 +114,9 @@ func (s *FingerprintService) ResolveOrCreateProfile(ctx context.Context, input d
 			matchType = domain.MatchTypeNew
 			score = 0
 			profileClusterID = requestClusterID
+			profileClusterPublicID = requestClusterPublicID
 			profile := s.buildNewProfile(input, hardFP, softFP, hardwareFP, profileClusterID, observedAt)
-			profileID, err = s.profiles.InsertBrowserProfile(txCtx, profile)
+			profileID, profilePublicID, err = s.profiles.InsertBrowserProfile(txCtx, profile)
 			if err != nil {
 				return err
 			}
@@ -134,24 +143,23 @@ func (s *FingerprintService) ResolveOrCreateProfile(ctx context.Context, input d
 			}
 		}
 
-		// Refresh counters for the profile's cluster (not the request's cluster).
-		deviceLinkedAccounts, err := s.clusters.CountClusterLinkedAccounts(txCtx, profileClusterID)
+		// Refresh counters for the profile's cluster.
+		deviceLinkedAccountIDs, err := s.clusters.GetClusterLinkedAccountIDs(txCtx, profileClusterID)
 		if err != nil {
 			return err
 		}
+		deviceLinkedAccounts := len(deviceLinkedAccountIDs)
+
 		profilesCount, err := s.clusters.CountClusterProfiles(txCtx, profileClusterID)
 		if err != nil {
 			return err
 		}
 
-		profileCluster, err := s.clusters.FindClusterByHardwareFP(txCtx,
-			func() string {
-				if matchedProfile != nil && matchedProfile.HardwareFP != "" {
-					return matchedProfile.HardwareFP
-				}
-				return hardwareFP
-			}(),
-		)
+		clusterHWFP := hardwareFP
+		if matchedProfile != nil && matchedProfile.HardwareFP != "" {
+			clusterHWFP = matchedProfile.HardwareFP
+		}
+		profileCluster, err := s.clusters.FindClusterByHardwareFP(txCtx, clusterHWFP)
 		if err != nil {
 			return err
 		}
@@ -164,9 +172,8 @@ func (s *FingerprintService) ResolveOrCreateProfile(ctx context.Context, input d
 			}
 		}
 
-		// Also update the request's cluster if it's different from the profile's.
 		if requestClusterID != profileClusterID {
-			reqDeviceAccounts, err := s.clusters.CountClusterLinkedAccounts(txCtx, requestClusterID)
+			reqAccountIDs, err := s.clusters.GetClusterLinkedAccountIDs(txCtx, requestClusterID)
 			if err != nil {
 				return err
 			}
@@ -179,7 +186,7 @@ func (s *FingerprintService) ResolveOrCreateProfile(ctx context.Context, input d
 				return err
 			}
 			if reqCluster != nil {
-				reqCluster.LinkedAccountsCnt = reqDeviceAccounts
+				reqCluster.LinkedAccountsCnt = len(reqAccountIDs)
 				reqCluster.ProfilesCount = reqProfiles
 				reqCluster.LastSeen = observedAt
 				if err := s.clusters.UpdateDeviceCluster(txCtx, reqCluster); err != nil {
@@ -188,14 +195,18 @@ func (s *FingerprintService) ResolveOrCreateProfile(ctx context.Context, input d
 			}
 		}
 
+		if deviceLinkedAccountIDs == nil {
+			deviceLinkedAccountIDs = []string{}
+		}
+
 		result = domain.ResolveResult{
-			BrowserProfileID:          profileID,
-			DeviceClusterID:           profileClusterID,
+			AccountID:                 input.AccountID,
+			BrowserProfileID:          profilePublicID,
+			GlobalDeviceID:            profileClusterPublicID,
 			MatchType:                 matchType,
 			Score:                     score,
-			IsMultiAccountSuspected:   linkedCount > 1 || deviceLinkedAccounts > 1,
-			LinkedAccountsCount:       linkedCount,
 			DeviceLinkedAccountsCount: deviceLinkedAccounts,
+			DeviceLinkedAccounts:      deviceLinkedAccountIDs,
 		}
 
 		return nil
@@ -206,26 +217,26 @@ func (s *FingerprintService) ResolveOrCreateProfile(ctx context.Context, input d
 	}
 
 	slog.Info("fingerprint resolved",
+		"account_id", result.AccountID,
 		"browser_profile_id", result.BrowserProfileID,
-		"device_cluster_id", result.DeviceClusterID,
+		"global_device_id", result.GlobalDeviceID,
 		"match_type", result.MatchType,
 		"score", result.Score,
-		"linked_accounts", result.LinkedAccountsCount,
-		"device_linked_accounts", result.DeviceLinkedAccountsCount,
+		"device_linked_accounts_count", result.DeviceLinkedAccountsCount,
 	)
 
 	return result, nil
 }
 
 // resolveCluster finds an existing device cluster by hardware_fp or creates one.
-func (s *FingerprintService) resolveCluster(ctx context.Context, hardwareFP string, input domain.FingerprintInput, observedAt time.Time) (int64, int, error) {
+func (s *FingerprintService) resolveCluster(ctx context.Context, hardwareFP string, input domain.FingerprintInput, observedAt time.Time) (int64, string, int, error) {
 	cluster, err := s.clusters.FindClusterByHardwareFP(ctx, hardwareFP)
 	if err != nil {
-		return 0, 0, err
+		return 0, "", 0, err
 	}
 
 	if cluster != nil {
-		return cluster.DeviceClusterID, cluster.LinkedAccountsCnt, nil
+		return cluster.DeviceClusterID, cluster.PublicID, cluster.LinkedAccountsCnt, nil
 	}
 
 	newCluster := &domain.DeviceCluster{
@@ -240,11 +251,11 @@ func (s *FingerprintService) resolveCluster(ctx context.Context, hardwareFP stri
 		LastSeen:       observedAt,
 		ProfilesCount:  1,
 	}
-	clusterID, err := s.clusters.InsertDeviceCluster(ctx, newCluster)
+	clusterID, clusterPublicID, err := s.clusters.InsertDeviceCluster(ctx, newCluster)
 	if err != nil {
-		return 0, 0, err
+		return 0, "", 0, err
 	}
-	return clusterID, 0, nil
+	return clusterID, clusterPublicID, 0, nil
 }
 
 func (s *FingerprintService) findMatch(ctx context.Context, input domain.FingerprintInput, hardFP, softFP string) (*domain.BrowserProfile, string, float64, error) {

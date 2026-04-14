@@ -15,7 +15,7 @@ func NewLinkRepo(pool *pgxpool.Pool) *LinkRepo {
 	return &LinkRepo{pool: pool}
 }
 
-func (r *LinkRepo) UpsertAccountProfileLink(ctx context.Context, accountID, profileID int64) error {
+func (r *LinkRepo) UpsertAccountProfileLink(ctx context.Context, accountID string, profileID int64) error {
 	q := getQuerier(ctx, r.pool)
 
 	sql := `INSERT INTO account_profile_links (account_id, browser_profile_id, first_seen, last_seen, events_count)

@@ -22,6 +22,7 @@ func NewProfileRepo(pool *pgxpool.Pool) *ProfileRepo {
 
 var profileColumns = `
 	browser_profile_id,
+	public_id,
 	device_cluster_id,
 	COALESCE(hardware_fp, ''),
 	COALESCE(current_device_id, ''),
@@ -53,7 +54,7 @@ var profileColumns = `
 func scanProfile(row pgx.Row) (*domain.BrowserProfile, error) {
 	var p domain.BrowserProfile
 	err := row.Scan(
-		&p.BrowserProfileID, &p.DeviceClusterID, &p.HardwareFP,
+		&p.BrowserProfileID, &p.PublicID, &p.DeviceClusterID, &p.HardwareFP,
 		&p.CurrentDeviceID, &p.CurrentCanvasFP,
 		&p.CurrentWebGLVendor, &p.CurrentWebGLRenderer,
 		&p.CurrentHardFP, &p.CurrentSoftFP,
@@ -117,7 +118,7 @@ func (r *ProfileRepo) FindCandidateProfiles(ctx context.Context, osFamily string
 	for rows.Next() {
 		var p domain.BrowserProfile
 		if err := rows.Scan(
-			&p.BrowserProfileID, &p.DeviceClusterID, &p.HardwareFP,
+			&p.BrowserProfileID, &p.PublicID, &p.DeviceClusterID, &p.HardwareFP,
 			&p.CurrentDeviceID, &p.CurrentCanvasFP,
 			&p.CurrentWebGLVendor, &p.CurrentWebGLRenderer,
 			&p.CurrentHardFP, &p.CurrentSoftFP,
@@ -138,7 +139,7 @@ func (r *ProfileRepo) FindCandidateProfiles(ctx context.Context, osFamily string
 	return profiles, rows.Err()
 }
 
-func (r *ProfileRepo) InsertBrowserProfile(ctx context.Context, p *domain.BrowserProfile) (int64, error) {
+func (r *ProfileRepo) InsertBrowserProfile(ctx context.Context, p *domain.BrowserProfile) (int64, string, error) {
 	q := getQuerier(ctx, r.pool)
 
 	stableAttrs := ensureJSON(p.StableAttrs)
@@ -163,9 +164,10 @@ func (r *ProfileRepo) InsertBrowserProfile(ctx context.Context, p *domain.Browse
 		$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,
 		$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,
 		$31,$32,$33
-	) RETURNING browser_profile_id`
+	) RETURNING browser_profile_id, public_id`
 
 	var id int64
+	var publicID string
 	err := q.QueryRow(ctx, sql,
 		p.DeviceClusterID, p.HardwareFP,
 		p.CurrentDeviceID, p.CurrentCanvasFP,
@@ -180,11 +182,11 @@ func (r *ProfileRepo) InsertBrowserProfile(ctx context.Context, p *domain.Browse
 		p.ColorDepth, p.MaxTouchPoints, p.Platform,
 		stableAttrs, variableAttrs,
 		p.FirstSeen, p.LastSeen, p.EventCount, p.LinkedAccountsCnt,
-	).Scan(&id)
+	).Scan(&id, &publicID)
 	if err != nil {
-		return 0, fmt.Errorf("insert profile: %w", err)
+		return 0, "", fmt.Errorf("insert profile: %w", err)
 	}
-	return id, nil
+	return id, publicID, nil
 }
 
 func (r *ProfileRepo) UpdateBrowserProfile(ctx context.Context, p *domain.BrowserProfile) error {

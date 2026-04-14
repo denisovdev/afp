@@ -22,7 +22,7 @@ func NewClusterRepo(pool *pgxpool.Pool) *ClusterRepo {
 func (r *ClusterRepo) FindClusterByHardwareFP(ctx context.Context, hardwareFP string) (*domain.DeviceCluster, error) {
 	q := getQuerier(ctx, r.pool)
 
-	sql := `SELECT device_cluster_id, hardware_fp,
+	sql := `SELECT device_cluster_id, public_id, hardware_fp,
 			COALESCE(webgl_vendor, ''), COALESCE(os_family, ''),
 			cpu_cores, device_memory_gb, screen_width, screen_height,
 			first_seen, last_seen, profiles_count, linked_accounts_cnt
@@ -32,7 +32,7 @@ func (r *ClusterRepo) FindClusterByHardwareFP(ctx context.Context, hardwareFP st
 
 	var c domain.DeviceCluster
 	err := q.QueryRow(ctx, sql, hardwareFP).Scan(
-		&c.DeviceClusterID, &c.HardwareFP,
+		&c.DeviceClusterID, &c.PublicID, &c.HardwareFP,
 		&c.WebGLVendor, &c.OSFamily,
 		&c.CPUCores, &c.DeviceMemoryGB,
 		&c.ScreenWidth, &c.ScreenHeight,
@@ -48,7 +48,7 @@ func (r *ClusterRepo) FindClusterByHardwareFP(ctx context.Context, hardwareFP st
 	return &c, nil
 }
 
-func (r *ClusterRepo) InsertDeviceCluster(ctx context.Context, c *domain.DeviceCluster) (int64, error) {
+func (r *ClusterRepo) InsertDeviceCluster(ctx context.Context, c *domain.DeviceCluster) (int64, string, error) {
 	q := getQuerier(ctx, r.pool)
 
 	sql := `INSERT INTO device_clusters (
@@ -56,18 +56,19 @@ func (r *ClusterRepo) InsertDeviceCluster(ctx context.Context, c *domain.DeviceC
 			cpu_cores, device_memory_gb, screen_width, screen_height,
 			first_seen, last_seen, profiles_count, linked_accounts_cnt
 		) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
-		RETURNING device_cluster_id`
+		RETURNING device_cluster_id, public_id`
 
 	var id int64
+	var publicID string
 	err := q.QueryRow(ctx, sql,
 		c.HardwareFP, c.WebGLVendor, c.OSFamily,
 		c.CPUCores, c.DeviceMemoryGB, c.ScreenWidth, c.ScreenHeight,
 		c.FirstSeen, c.LastSeen, c.ProfilesCount, c.LinkedAccountsCnt,
-	).Scan(&id)
+	).Scan(&id, &publicID)
 	if err != nil {
-		return 0, fmt.Errorf("insert device cluster: %w", err)
+		return 0, "", fmt.Errorf("insert device cluster: %w", err)
 	}
-	return id, nil
+	return id, publicID, nil
 }
 
 func (r *ClusterRepo) UpdateDeviceCluster(ctx context.Context, c *domain.DeviceCluster) error {
@@ -111,6 +112,32 @@ func (r *ClusterRepo) CountClusterLinkedAccounts(ctx context.Context, clusterID 
 		return 0, fmt.Errorf("count cluster linked accounts: %w", err)
 	}
 	return count, nil
+}
+
+func (r *ClusterRepo) GetClusterLinkedAccountIDs(ctx context.Context, clusterID int64) ([]string, error) {
+	q := getQuerier(ctx, r.pool)
+
+	sql := `SELECT DISTINCT apl.account_id
+		FROM account_profile_links apl
+		JOIN browser_profiles bp ON bp.browser_profile_id = apl.browser_profile_id
+		WHERE bp.device_cluster_id = $1
+		ORDER BY apl.account_id`
+
+	rows, err := q.Query(ctx, sql, clusterID)
+	if err != nil {
+		return nil, fmt.Errorf("get cluster linked account ids: %w", err)
+	}
+	defer rows.Close()
+
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, fmt.Errorf("scan account id: %w", err)
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
 }
 
 func (r *ClusterRepo) CountClusterProfiles(ctx context.Context, clusterID int64) (int, error) {

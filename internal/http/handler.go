@@ -1,23 +1,29 @@
 package http
 
 import (
+	"encoding/base64"
 	"encoding/json"
+	"io"
 	"log/slog"
 	"net/http"
+	"strings"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 
+	"github.com/dxngee/antifraud-processing/internal/config"
 	"github.com/dxngee/antifraud-processing/internal/domain"
 	"github.com/dxngee/antifraud-processing/internal/service"
+	"github.com/dxngee/antifraud-processing/internal/utils"
 )
 
 type Handler struct {
 	svc *service.FingerprintService
+	cfg *config.Config
 }
 
-func NewHandler(svc *service.FingerprintService) *Handler {
-	return &Handler{svc: svc}
+func NewHandler(svc *service.FingerprintService, cfg *config.Config) *Handler {
+	return &Handler{svc: svc, cfg: cfg}
 }
 
 func (h *Handler) Router() http.Handler {
@@ -57,18 +63,30 @@ func (h *Handler) health(w http.ResponseWriter, _ *http.Request) {
 }
 
 func (h *Handler) resolveFingerprint(w http.ResponseWriter, r *http.Request) {
-	var input domain.FingerprintInput
-	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid JSON body", err.Error())
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "failed to read body", err.Error())
 		return
 	}
 
-	if input.AccountID <= 0 {
-		writeError(w, http.StatusBadRequest, "account_id must be > 0", "")
+	raw, err := base64.StdEncoding.DecodeString(strings.TrimSpace(string(body)))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "failed to decode base64 body", err.Error())
 		return
 	}
 
-	result, err := h.svc.ResolveOrCreateProfile(r.Context(), input)
+	input, err := utils.Unpack[domain.FingerprintInput](raw, h.cfg.PrivateKey)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "failed to unpack body", err.Error())
+		return
+	}
+
+	if input.AccountID == "" {
+		writeError(w, http.StatusBadRequest, "account_id is required", "")
+		return
+	}
+
+	result, err := h.svc.ResolveOrCreateProfile(r.Context(), *input)
 	if err != nil {
 		slog.Error("resolve failed", "error", err)
 		writeError(w, http.StatusInternalServerError, "internal error", "")

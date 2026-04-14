@@ -24,6 +24,7 @@ services:
       HTTP_ADDR: ":8080"
       MATCH_THRESHOLD: "0.75"
       MIGRATIONS_DIR: "/migrations"
+      PRIVATE_KEY: "${PRIVATE_KEY}"
     depends_on:
       postgres:
         condition: service_healthy

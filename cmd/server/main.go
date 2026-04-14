@@ -52,7 +52,7 @@ func run() error {
 	txm := postgres.NewTxManager(pool)
 
 	svc := service.NewFingerprintService(profileRepo, eventRepo, linkRepo, clusterRepo, txm, cfg.MatchThreshold)
-	h := handler.NewHandler(svc)
+	h := handler.NewHandler(svc, cfg)
 
 	srv := &http.Server{
 		Addr:         cfg.HTTPAddr,

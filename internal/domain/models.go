@@ -8,6 +8,7 @@ import (
 
 type BrowserProfile struct {
 	BrowserProfileID int64  `json:"browser_profile_id"`
+	PublicID         string `json:"public_id"`
 	DeviceClusterID  *int64 `json:"device_cluster_id"`
 	HardwareFP       string `json:"hardware_fp"`
 	CurrentDeviceID  string `json:"current_device_id"`
@@ -54,7 +55,7 @@ type BrowserProfile struct {
 type FingerprintEvent struct {
 	EventID          int64  `json:"event_id"`
 	BrowserProfileID *int64 `json:"browser_profile_id"`
-	AccountID        int64  `json:"account_id"`
+	AccountID        string `json:"account_id"`
 	ObservedAt       time.Time `json:"observed_at"`
 	HardwareFP       string `json:"hardware_fp"`
 
@@ -97,6 +98,7 @@ type FingerprintEvent struct {
 
 type DeviceCluster struct {
 	DeviceClusterID int64     `json:"device_cluster_id"`
+	PublicID        string    `json:"public_id"`
 	HardwareFP      string    `json:"hardware_fp"`
 	WebGLVendor     string    `json:"webgl_vendor"`
 	OSFamily        string    `json:"os_family"`
@@ -111,7 +113,7 @@ type DeviceCluster struct {
 }
 
 type AccountProfileLink struct {
-	AccountID        int64     `json:"account_id"`
+	AccountID        string    `json:"account_id"`
 	BrowserProfileID int64     `json:"browser_profile_id"`
 	FirstSeen        time.Time `json:"first_seen"`
 	LastSeen         time.Time `json:"last_seen"`

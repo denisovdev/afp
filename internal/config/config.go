@@ -1,12 +1,16 @@
 package config
 
 import (
+	"crypto/rsa"
 	"fmt"
 	"os"
 	"strconv"
+
+	"github.com/dxngee/antifraud-processing/internal/utils"
 )
 
 type Config struct {
+	PrivateKey     *rsa.PrivateKey
 	HTTPAddr       string
 	DatabaseURL    string
 	MatchThreshold float64
@@ -29,6 +33,16 @@ func Load() (*Config, error) {
 			return nil, fmt.Errorf("invalid MATCH_THRESHOLD: %w", err)
 		}
 		cfg.MatchThreshold = f
+	}
+
+	if v := os.Getenv("PRIVATE_KEY"); v != "" {
+		privateKey, err := utils.ParsePrivateKey(v)
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse private key: %w", err)
+		}
+		cfg.PrivateKey = privateKey
+	} else {
+		return nil, fmt.Errorf("PRIVATE_KEY is required")
 	}
 
 	return cfg, nil
