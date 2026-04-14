@@ -27,7 +27,7 @@ func (h *Handler) Router() http.Handler {
 	r.Use(middleware.RealIP)
 	r.Use(corsMiddleware)
 
-	r.Get("/healthz", h.healthz)
+	r.Get("/health", h.health)
 
 	r.Route("/api/v1", func(r chi.Router) {
 		r.Post("/fingerprints/resolve", h.resolveFingerprint)
@@ -52,7 +52,7 @@ func corsMiddleware(next http.Handler) http.Handler {
 	})
 }
 
-func (h *Handler) healthz(w http.ResponseWriter, _ *http.Request) {
+func (h *Handler) health(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 

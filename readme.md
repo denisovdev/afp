@@ -26,7 +26,7 @@ docker compose up --build
 ### Health check
 
 ```bash
-curl http://localhost:8080/healthz
+curl http://localhost:8080/health
 ```
 
 ### Resolve fingerprint
